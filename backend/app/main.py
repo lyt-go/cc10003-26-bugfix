@@ -5,14 +5,36 @@
 """
 from __future__ import annotations
 
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+import os
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.routers import ROUTERS
+from app.services.queryboard import service as queryboard_service
 from app.store import store
 
-app = FastAPI(title="指标口径与分析实验平台", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # 启动巡检：修复「属性已撤下、模板仍启用、旧缓存残留」的存量脏状态。
+    queryboard_service.reconcile()
+    yield
+
+
+app = FastAPI(title="指标口径与分析实验平台", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(RuntimeError)
+def runtime_error_handler(_: Request, exc: RuntimeError) -> JSONResponse:
+    """事务块回滚后抛出的写入故障统一结构化返回，便于调用方确认模板保持不可用。"""
+    return JSONResponse(
+        status_code=500,
+        content={"ok": False, "message": f"事务已回滚：{exc}", "entry": None, "error": None},
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +46,11 @@ app.add_middleware(
 
 for module in ROUTERS:
     app.include_router(module.router)
+
+if os.environ.get("LOCAL_TEST") == "1":
+    from app.routers.testing import router as testing_router
+
+    app.include_router(testing_router)
 
 
 @app.get("/api/health")

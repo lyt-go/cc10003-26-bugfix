@@ -99,10 +99,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('维度属性动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || payload.ok === false) {
+      errorMessage.value = payload.message ?? '维度属性动作未生效，请稍后重试'
     }
     await reload()
   } catch (error) {

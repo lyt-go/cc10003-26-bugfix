@@ -19,6 +19,9 @@ class ActionResult(BaseModel):
     ok: bool
     message: str
     entry: dict[str, Any] | None = None
+    # 业务准入失败时携带结构化错误码与上下文，例如：
+    # {"code": "DIMENSION_PROPERTY_RETIRED", "context": {"property_id": "...", "retired_version": "v3"}}
+    error: dict[str, Any] | None = None
 
 
 class EntryPayload(BaseModel):

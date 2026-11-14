@@ -31,12 +31,23 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>绑定属性版本</th>
+          <th>版本枚举快照</th>
+          <th>验证结论</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>{{ row.bound_property_id ? `${row.bound_property_id}@${row.bound_version ?? '未指定'}` : '未绑定' }}</td>
+          <td>{{ formatEnum(row.snapshot_enum_values) }}</td>
+          <td>
+            <span v-if="validationOf(row)" class="error-text">
+              {{ validationOf(row)?.code }}（{{ formatContext(validationOf(row)?.context) }}）
+            </span>
+            <span v-else>—</span>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -50,7 +61,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无聚合查询数据，可先登记查询模板</td>
+          <td :colspan="columns.length + 4" class="empty-state">暂无聚合查询数据，可先登记查询模板</td>
         </tr>
       </tbody>
     </table>
@@ -68,12 +79,34 @@ import { onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+type ValidationError = { code: string; context: Record<string, string | number | null> }
 
 const ENDPOINT = '/api/queryboard'
 const columns = ["模板编号", "指标名称", "维度字段", "度量字段", "排序规则", "分页上限", "缓存秒数", "数据源"]
 const actions = ["提交模板验证", "启用模板", "废弃模板"]
 const statuses = ["草稿", "模板验证中", "已启用", "已废弃"]
 const stats = [{"label": "查询模板总数", "value": 0}, {"label": "已启用模板", "value": 0}, {"label": "模板验证中", "value": 0}]
+
+function formatEnum(values: unknown): string {
+  return Array.isArray(values) && values.length ? values.join('、') : '—'
+}
+
+function validationOf(row: Row): ValidationError | null {
+  const value = (row as Record<string, unknown>).validation_error
+  if (value && typeof value === 'object' && 'code' in value) {
+    return value as ValidationError
+  }
+  return null
+}
+
+function formatContext(context?: Record<string, string | number | null>): string {
+  if (!context) {
+    return ''
+  }
+  return Object.entries(context)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join('，')
+}
 
 const rows = ref<Row[]>([])
 const total = ref(0)
@@ -99,10 +132,14 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('聚合查询动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || payload.ok === false) {
+      const validation = payload.error as ValidationError | undefined
+      errorMessage.value = validation
+        ? `${validation.code}：${formatContext(validation.context)}`
+        : (payload.message ?? '聚合查询动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {

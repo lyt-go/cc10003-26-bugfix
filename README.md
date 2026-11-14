@@ -75,5 +75,26 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 维度属性版本准入（dimprop ↔ queryboard）
+
+维度属性与聚合模板共享枚举版本，枚举/数据类型/数据源的唯一事实源是
+`dim_versions` 版本注册表，而不是列表行上的展示字段：
+
+- 每次「发布属性」生成不可变新版本（`v1`、`v2`……），旧发布版本同步退役；
+  「下线属性」退役当前发布版本；「回滚」把历史版本内容复制成新版本，旧版本号不复活。
+- 模板绑定具体发布版本，`snapshot_*` 字段只从该版本读取。属性下架或换版后，
+  引用旧版本的已启用模板自动回到「模板验证中」，草稿字段保留并写入
+  `validation_error`，聚合缓存按版本键清理，模板不可再启用。
+- 准入错误码：`DIMENSION_PROPERTY_RETIRED`、`DIMENSION_PROPERTY_NOT_FOUND`、
+  `DIMENSION_PROPERTY_EMPTY_ENUM`、`DIMENSION_PROPERTY_UNBOUND`，
+  错误上下文随动作接口的 `error` 字段返回（含 `property_id`、`retired_version`）。
+- 跨表写入走全局锁 + 快照事务（`app/services/locking.py`），任一步失败整体回滚，
+  模板保持不可用；服务启动时 `reconcile()` 巡检并修复存量脏状态。
+- 互查入口：`GET /api/dimprop/property/{属性编号}/versions`、
+  `.../publications`，以及 `GET /api/queryboard/{id}/aggregate`。
+- `LOCAL_TEST=1` 时额外挂载 `/api/_test/reset` 与 `/api/_test/faults`，
+  配合 `backend/tests/acceptance_test.py` 做下架、枚举改名、空枚举、回滚、
+  并发换版与写入失败回滚的验收。
+
 领域：数据工程
 子方向：数据分析与数据应用
